@@ -31,9 +31,10 @@ In this document I guide the interested researcher through the files contained i
 
 SPECIAL REQUIREMENTS
 In order to be able to run the code for the simulations it is necessary to have installed the following programs: 
-	-R: a free software environment for statistical computing and graphics. To download please follow the instructions in the following link: https://www.r-project.org/ 
 
-	-RStudio: an integrated development environment (IDE) for R. It includes a console, syntax-highlighting editor that supports direct code execution, as well as tools for plotting, history, debugging and workspace management. Download instructions in:  https://www.rstudio.com/products/rstudio/download/ 
+	-R: a free software environment for statistical computing and graphics. To download please follow the instructions in the following link: https://www.r-project.org/ 
+	-RStudio: an integrated development environment (IDE) for R. It includes a console, syntax-highlighting editor that supports direct code execution, as well as tools for plotting, history, debugging and workspace management. Download instructions in:  
+	https://www.rstudio.com/products/rstudio/download/ 
 
 Furthermore, it is essential to install several R packages. Further instructions and list of necessary packages can be found in the R code files. 
 
