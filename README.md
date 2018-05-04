@@ -40,7 +40,7 @@ Furthermore, it is essential to install several R packages. Further instructions
 
 FOLDERS 
 
-1.R code
+1. R code
 This folder contains the code to perform the Monte Carlo simulations and the illustration with the empirical dataset. It is divided in three subfolders: Classical Mediation Approach, Potential Outcomes, Empirical Illustration.  All the documents in this folder are R Notebook files, which are opened with R Studio. Each file has all the code required to generate (or load) the datasets, do the estimation procedure and produce the final results (tables and plots). Specific instructions for running the code can be found inside each file. 
 	The Classical Mediation Approach folder contains four R Notebook files to  perform the simulations for the two methods based on the classical mediation approach. To avoid mixing results, each file corresponds to an exposure-mediator-type combination (i.e. normal exposure-normal mediator, normal exposure-binary mediator…etc.). 
 	The Potential Outcomes  folder contains four R Notebook files to  perform the simulations for the two methods based on the Potential Outcomes mediation approach. As before, each file corresponds to an exposure-mediator-type combination (i.e. normal exposure-normal mediator, normal exposure-binary mediator…etc.). 
