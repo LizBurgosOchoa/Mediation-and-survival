@@ -21,7 +21,7 @@ Names: Judith Rijnhart, Martijn Heymans, Jos Twisk
 Affiliation: VU medical center, Department of Epidemiology and Biostatistics
 
 INTRODUCTION
- “Comparison of methods to perform mediation analysis with time-to-event outcomes” is a research project that aims to compare the statistical performance of four methods to perform mediation analysis with time-to-event outcomes. This was done by means of Monte Carlo simulations and an illustration with an empirical dataset. The compared methods are: I) the classical mediation approach with Cox PH model (ab and c-c’ methods); II) the classical mediation approach with the AFT model (ab and c-c’ methods); III-IV) Lange et al. [23] potential outcomes approach for both, Cox and AFT models, respectively. 
+ “Comparison of methods to perform mediation analysis with time-to-event outcomes” is a research project that aims to compare the statistical performance of four methods to perform mediation analysis with time-to-event outcomes. This was done by means of Monte Carlo simulations and an illustration with an empirical dataset. The compared methods are: I) the classical mediation approach with Cox PH model (ab and c-c’ methods); II) the classical mediation approach with the AFT model (ab and c-c’ methods); III-IV) Potential outcomes approach for both, Cox and AFT models, respectively. 
 In this document I guide the interested researcher through the files contained in the research archive. All the described documents are relevant for the replicability of this study. The files are organized in five folders which are listed below. A further description of each the contents of each folder can be found in the next sections.
 	-R code
 	-Raw results
