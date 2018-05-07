@@ -54,5 +54,5 @@ FOLDERS
 	This folder contains a pdf file with the 16 full results tables. In the paper, this file is referred as Additional File 1. 
 4. Data Management Plan
 	This folder contains a single  PDF document corresponding to the Data Management Plan (DMP). The DMP is a formal document that 		outlines how the data were handled during the research project, and how it will be handled after the project is completed. 		Topics regarding responsibility for the data management and storage, privacy and ethical issues, are addressed in this document. 	An schedule of the project can be found in the DMP, specifically in the Data Analysis Plan for NESDA, at the end of the DMP 		document.  
-5.Additional Figures
+5. Additional Figures
 	Two PDF files containing additional figures: Single mediator model and Scheme of compared methods. 
