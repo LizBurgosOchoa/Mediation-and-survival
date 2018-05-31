@@ -1,4 +1,4 @@
-# Mediation-and-survival
+# Mediation-and-survival: Research archive
 
 CONTENTS OF THIS FILE
 --------------------- 
