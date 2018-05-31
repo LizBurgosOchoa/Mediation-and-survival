@@ -1,0 +1,558 @@
+---
+title: "Simulations classical mediation approach: AFT and Cox models, binary exposure and binary mediator"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+This RNotebook contains the code necessary to replicate the results for scenarios with binary exposure and binary mediator, using the classical mediation approach (reported in Additional File 1). 
+
+Try executing this chunk by clicking the *Run current chunk* button (green arrow, top right) within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Packages needed for simulation. Please install the following packages before running the next code batches.
+```{r}
+#Please ensure that these packages are installed in order to run the simulations and plot results.
+#To install packages write (without the #):
+#install.packages("survival")
+
+library(survival)
+library(ggplot2)
+library(gridExtra)
+library(ggthemes)
+library(cowplot)
+library(ggpubr)
+library(RColorBrewer)
+
+```
+
+PART 1: SIMULATIONS
+
+1.1 Simulation function
+
+The "sim_rare_ev" function generates 500 datasets based on the specified simulation scenario. 
+The arguments are: 
+- obslen, study duration, equivalent to parameter delta in censoring distribution.
+- shapeT, shape of survival times (hazard rate), values of 1.5, 1 or 2/3.
+- rare, censoring level, values of NC (no censoring), 40% or 90%.
+- n, sample size (250, 500, 1000).
+- exposure, distribution of exposure, normal or binomial.
+- mediator, distribution of mediator, normal or binomial.
+- model, model for mediation analysis, either AFT or Cox.
+
+```{r}
+
+#Function for generating datasets
+
+sim_rare_ev<-function(obslen, shapeT, rare, n, exposure, mediator, model){
+  
+  #Seed and repetitions
+  set.seed(145)
+  R<-500 #number of datasets created
+  
+  #Creating matrices to store parameters 
+  alpha<-matrix(rep(0,R),R,1)
+  beta<-matrix(rep(0,R),R,1)
+  c<-matrix(rep(0,R),R,1)
+  c_prime<- matrix(rep(0,R),R,1)
+  non_events<-matrix(rep(0,R),R,1)
+  simdat<-vector(mode = "list", length = R)
+  
+  #MEDIATION EFFECTS AND OTHER COEFFICIENTS
+  a = 0.6 #values for the "a" effect (regression coefficient
+  #for X->M path)
+  b = 0.6 #values for the "b" effect (regression coefficient
+  #for M->Y path after X is controlled)
+  cp = 0.6 #values for the "c-prime" effect (regression coefficient for X->Y after M is controlled)
+  beta0 <- 0 #intercept for mediator regression formula
+  b0 <- 4 #intercept for survival times parameterization (Equation 5 in paper) 
+  
+  for (i in 1:R){ #loop for the simulation
+    
+  #SAMPLE VARIABLES
+    #Exposure: either normal or binomial distribution
+    if (exposure=="NORM"){
+    X <- as.vector(rnorm(n, 0 , 0.5))
+    } #if
+    
+    else if (exposure=="BIN"){
+    X <- as.vector(rbinom(n, 1 , 0.5))
+    } # else if
+    
+    dat <- as.data.frame(X) #start data frame
+    
+    #Mediator: either normal or binomial. Includes the "a" effect due to X and random error, mean = 0, SD = 1
+    if (mediator=="NORM"){
+    dat$M <- a*X + rnorm(n, 0, 1)
+    } #if
+    
+    else if (mediator=="BIN"){
+    Y.linpred <- beta0 + a * X 
+    Y.prob <- exp(Y.linpred) / (1 + exp(Y.linpred))
+    dat$M <- rbinom(n, 1, Y.prob)
+    } #else if
+    
+    M <- as.vector(dat$M) #to use it later for the survival times
+    
+    #Generate Time and Censoring
+    scale <- exp(b0+cp*X+b*M+((1/shapeT))) #scale parameter weibull using AFT parameterization
+    
+    #If no censoring
+    if (rare=="NC"){
+      dat$Time <- rweibull(n, shape=shapeT, scale=scale) 
+      dat$time <- dat$Time #no censoring: time=Time
+      dat$event <-  rep(1,n)   # all cases set to 1, for all event is observed
+    } # if bracket
+    
+    #If censored
+    else{
+      dat$Time <- rweibull(n, shape=shapeT, scale=scale) 
+      dat$C <- runif(n,0,obslen) #censoring time (independent)
+      dat$time <- pmin(dat$Time,dat$C)  #observed time is min of censored and true
+      dat$event = dat$time==dat$Time  # set to 1 if event is observed
+      dat$event<-ifelse(dat$event == "TRUE", 1, ifelse(dat$event == "FALSE", 0,7)) #change to 0 or 1 for computing censoring rate
+      
+# According to specified censoring level:
+# Continue iterating for sampling of variables until satisfied censoring and sample size conditions:
+#---------------------------------------------------------------------# 
+# 40% censoring 
+    if (rare=="40"){
+    #-------------- WHILE STATEMENT --------------#
+      while(sum(dat$event) < .60*n | sum(1 - dat$event) < .40*n){
+        n2<-2   
+        
+        #Exposure 
+        if (exposure=="NORM"){
+        X2 = as.vector(rnorm(n2, 0 , 0.5)) #exposure
+        }
+        
+        else if (exposure=="BIN"){
+        X2 = as.vector(rbinom(n2, 1 , 0.5)) #exposure
+        }
+        
+        dat2 <- as.data.frame(X2)
+        colnames(dat2) <- c('X')
+          
+        #Mediator
+        if (mediator=="NORM"){
+        dat2$M = a*X2 + rnorm(n2, 0, 1)
+        }
+        
+        else if (mediator=="BIN"){
+        Y.linpred2 <- beta0 + a * X2 
+        Y.prob2 <- exp(Y.linpred) / (1 + exp(Y.linpred2))
+        dat2$M <- rbinom(n2, 1, Y.prob2)          
+        M2<-as.vector(dat2$M)  
+        }
+        
+        M2<-as.vector(dat2$M)
+          
+        #Time and censoring
+        scale2<-exp(b0+cp*X2+b*M2+((1/shapeT)))
+        dat2$Time<-rweibull(n2, shape=shapeT, scale=scale2)
+        dat2$C<- runif(n2,0,obslen) #censoring time (independent)
+        dat2$time = pmin(dat2$Time,dat2$C)  #observed time is min of censored and time
+        dat2$event = dat2$time==dat2$Time  # set to 1 if event is observed
+        dat2$event<-ifelse(dat2$event == "TRUE", 1, ifelse(dat2$event == "FALSE", 0,7))
+        
+        #Bind dat and dat2
+        dat <- rbind(dat, dat2) 
+        dat <- rbind(dat[order(dat$event),][1:(.40*n),], dat[order(1 - dat$event),][1:(.60*n),]) 
+          
+        } #end of while statement
+      } #else if bracket
+      
+#---------------------------------------------------------------------#
+# 90% censoring 
+      
+   else if (rare=="90"){
+    #-------------- WHILE STATEMENT --------------#
+     while(sum(dat$event) < .10*n | sum(1 - dat$event) < .90*n){
+      n2<-2 
+      
+      #Exposure 
+      if (exposure=="NORM"){
+      X2 = as.vector(rnorm(n2, 0 , 0.5)) #exposure
+      }
+        
+      else if (exposure=="BIN"){
+      X2 = as.vector(rbinom(n2, 1 , 0.5)) #exposure
+      }
+        
+      dat2 <- as.data.frame(X2)
+      colnames(dat2) <- c('X')
+          
+      #Mediator
+      if (mediator=="NORM"){
+      dat2$M = a*X2 + rnorm(n2, 0, 1)
+      }
+        
+      else if (mediator=="BIN"){
+      Y.linpred2 <- beta0 + a * X2 
+      Y.prob2 <- exp(Y.linpred) / (1 + exp(Y.linpred2))
+      dat2$M <- rbinom(n2, 1, Y.prob2)          
+      M2<-as.vector(dat2$M)  
+      }
+        
+      M2<-as.vector(dat2$M)
+          
+      #Time and censoring
+      scale2<-exp(b0+cp*X2+b*M2+((1/shapeT)))
+      dat2$Time<-rweibull(n2, shape=shapeT, scale=scale2)
+      dat2$C<- runif(n2,0,obslen) #censoring time (independent)
+      dat2$time = pmin(dat2$Time,dat2$C)  #observed time is min of censored and Time
+      dat2$event = dat2$time==dat2$Time  # set to 1 if event is observed
+      dat2$event<-ifelse(dat2$event == "TRUE", 1, ifelse(dat2$event == "FALSE", 0,7))
+      
+      #Bind dat and dat2
+      dat <- rbind(dat, dat2)
+      dat <- rbind(dat[order(dat$event),][1:(.90*n),], dat[order(1 - dat$event),][1:(.10*n),])
+          
+        } #end of while statement
+      } #else if bracket
+    } #else bracket 
+#---------------------------------------------------------------------# 
+    
+#---------------------------------------------------------------------# 
+    simdat[[i]] <- dat # final simulated dataset
+    
+  #Percentage of censoring
+    non_events[i]<- table(factor(dat$event,levels = c("0","1") ))[1]
+    censoring<-non_events*100/n
+    
+  #MEDIATION ANALYSIS: AFT or COX models
+    
+    if (model=="AFT"){
+    #Extracts the estimated "a" effect. Linear or logistic regression if mediator is normal or binomial.
+      if (mediator=="NORM"){
+      alpha[i] <- coefficients(lm(M ~ X,dat))[2] # X coefficient 
+      }
+        
+      else if (mediator=="BIN"){
+      alpha[i] <- coefficients(glm(M ~ X,family=binomial(),dat))[2] # X coefficient 
+      }
+      
+    #Extracts the estimated "b" effect , M coefficient 
+    beta[i] <- (coefficients(survreg(formula = Surv(time, event) ~ X + M, dat,dist = "weibull"))[3])
+    
+    #Extract estimated c-prime  time on X ADJUSTED for M 
+    c_prime[i] <- (coefficients(survreg(formula = Surv(time, event) ~ X + M, dat,dist = "weibull"))[2])
+    
+    #Extract c coefficient from time on X UNADJUSTED for M
+    x_m_y <- survreg(formula = Surv(time, event) ~ X, dat,dist = "weibull")
+    c[i]<- (coefficients(x_m_y)[2])
+    } #if
+    
+    else if (model=="COX"){
+    #Extracts the estimated "a" effect. Linear or logistic regression.
+      if (mediator=="NORM"){
+      alpha[i] <- coefficients(lm(M ~ X,dat))[2] # X coefficient 
+      }
+        
+      else if (mediator=="BIN"){
+      alpha[i] <- coefficients(glm(M ~ X,family=binomial(),dat))[2] # X coefficient 
+      }
+
+    #Extracts the estimated "b" effect , M coefficient 
+    beta[i]<- -(coefficients(coxph(formula = Surv(time, event) ~ X + M, dat , method = "breslow"))[2])
+    
+    #Extract estimated c-prime  time on X ADJUSTED for M 
+    c_prime[i]<- -(coefficients(coxph(formula = Surv(time, event) ~ X + M,dat, method = "breslow"))[1])
+    
+    #Extract c coefficient from time on X UNADJUSTED for M
+    x_m_y<-coxph(formula = Surv(time, event) ~ X, dat ,method = "breslow")
+    c[i]<- -(coefficients(x_m_y)[1])  
+    }
+    
+    #Indirect effect: effect estimates
+    med.pars <- as.data.frame(cbind(alpha,beta,c_prime,c))
+    colnames(med.pars) <- c("alpha","beta","c_prime", "c")
+    med.pars <- na.omit(med.pars) #eliminate NA's in case of non-convergence
+    
+    #Compute indirect effect method a*b
+    med_par1 <- (med.pars$alpha*med.pars$beta)
+    
+    
+    #Compute indirect effect method c-c'
+    med_par2<-(med.pars$c-med.pars$c_prime)
+    
+  }# end simulation loop
+  
+  # RESULTS
+  true.ind<-a*b #true indirect effect
+  N <- n #sample size 
+  Shape <- shapeT #hazard rate
+  
+  #Average of estimates: a, b, c', c, IE ab, IE c-c'.
+  m_alpha <- as.table(mean(med.pars$alpha))
+  m_beta <- as.table(mean(med.pars$beta))
+  m_cp <- as.table(mean(med.pars$c_prime))
+  m_c <- as.table(mean(med.pars$c))
+  m_a_b <- as.table(mean(med_par1))
+  m_c_cp <- as.table(mean(med_par2))
+  
+  #Absolute difference between ab and c-c' estimates
+  diff <- as.table(abs(m_a_b-m_c_cp))
+  
+  #Censoring rate
+  m_cens <-mean(censoring) #mean censoring
+  
+  #Bias
+  #Absolute bias
+  abs.bias.ab <- abs(m_a_b-true.ind)
+  abs.bias.c_cp <- abs(m_c_cp-true.ind)
+  
+  #Proportional bias
+  prop.bias.ab <- ((m_a_b-true.ind)/true.ind)*100
+  prop.bias.ccp <- ((m_c_cp-true.ind)/true.ind)*100
+  
+  #SD over simulations: Also called "empirical SE" as in paper. 
+  sd.ab <- sd(med_par1)
+  sd.ccp <- sd(med_par2)
+
+  #MSE
+  mse_ab <- (m_a_b-true.ind)^2 + (sd.ab)^2
+  mse_ccp <- (m_c_cp-true.ind)^2 + (sd.ccp)^2
+  
+  
+#Table with results
+results <- cbind(m_alpha,m_beta, m_c ,m_cp, m_a_b, sd.ab, m_c_cp, sd.ccp, diff, abs.bias.ab,abs.bias.c_cp,prop.bias.ab,prop.bias.ccp, mse_ab,mse_ccp, m_cens,N, shapeT)
+  
+return(results)
+  
+}#end of function
+
+#----------------------------------------------------------------------#
+```
+
+
+1.2 Run simulations with different scenarios
+
+The following code batched run the simulation function with all the scenarios for the AFT and Cox model.
+
+AFT MODEL: Scenarios
+
+```{r}
+#250 SAMPLE SIZE
+#SHAPE 1.5
+
+nc_1.5_250_AFT <- sim_rare_ev(0,1.5,"NC",250, "BIN", "BIN", "AFT")
+nonrare_1.5_250_AFT <- sim_rare_ev(280,1.5,"40",250, "BIN", "BIN", "AFT")
+rare_1.5_250_AFT <- sim_rare_ev(20,1.5,"90",250, "BIN", "BIN", "AFT")
+
+#SHAPE 1
+nc_1_250_AFT <- sim_rare_ev(0,1,"NC",250, "BIN", "BIN", "AFT")
+nonrare_1_250_AFT <- sim_rare_ev(360,1,"40",250, "BIN", "BIN", "AFT")
+rare_1_250_AFT <- sim_rare_ev(20,1,"90",250, "BIN", "BIN", "AFT")
+
+#SHAPE 2/3
+nc_23_250_AFT <- sim_rare_ev(0,2/3,"NC",250, "BIN", "BIN", "AFT")
+nonrare_23_250_AFT <- sim_rare_ev(540,2/3,"40",250, "BIN", "BIN", "AFT")
+rare_23_250_AFT <- sim_rare_ev(12,2/3,"90",250, "BIN", "BIN", "AFT")
+
+
+#500 SAMPLE SIZE
+#SHAPE 1.5
+nc_1.5_500_AFT <- sim_rare_ev(0,1.5,"NC",500, "BIN", "BIN", "AFT")
+nonrare_1.5_500_AFT <- sim_rare_ev(280,1.5,"40",500, "BIN", "BIN", "AFT")
+rare_1.5_500_AFT <- sim_rare_ev(20, 1.5,"90",500, "BIN", "BIN", "AFT")
+
+#SHAPE 1
+nc_1_500_AFT <- sim_rare_ev(0,1,"NC",500, "BIN", "BIN", "AFT")
+nonrare_1_500_AFT <- sim_rare_ev(360,1,"40",500, "BIN", "BIN", "AFT")
+rare_1_500_AFT <- sim_rare_ev(20,1,"90",500, "BIN", "BIN", "AFT")
+
+#SHAPE 2/3
+nc_23_500_AFT <- sim_rare_ev(0,2/3,"NC",500, "BIN", "BIN", "AFT")
+nonrare_23_500_AFT <- sim_rare_ev(540,2/3,"40",500, "BIN", "BIN", "AFT")
+rare_23_500_AFT <- sim_rare_ev(12,2/3,"90",500, "BIN", "BIN", "AFT")
+
+#1000 SAMPLE SIZE
+#SHAPE 1.5
+nc_1.5_1000_AFT <- sim_rare_ev(0,1.5,"NC",1000, "BIN", "BIN", "AFT")
+nonrare_1.5_1000_AFT <- sim_rare_ev(280,1.5,"40",1000, "BIN", "BIN", "AFT")
+rare_1.5_1000_AFT <- sim_rare_ev(20,1.5,"90",1000, "BIN", "BIN", "AFT")
+
+#SHAPE 1
+nc_1_1000_AFT <- sim_rare_ev(0,1,"NC",1000, "BIN", "BIN", "AFT")
+nonrare_1_1000_AFT <- sim_rare_ev(360,1,"40",1000, "BIN", "BIN", "AFT")
+rare_1_1000_AFT <- sim_rare_ev(15,1,"90",1000, "BIN", "BIN", "AFT")
+
+#SHAPE 2/3
+nc_23_1000_AFT <- sim_rare_ev(0,2/3,"NC",1000, "BIN", "BIN", "AFT")
+nonrare_23_1000_AFT <- sim_rare_ev(540,2/3,"40",1000, "BIN", "BIN", "AFT")
+rare_23_1000_AFT <- sim_rare_ev(15,2/3,"90",1000, "BIN", "BIN", "AFT")
+
+```
+
+
+AFT MODEL: Results tables 
+```{r}
+#Full results 
+tab.aft.nexp.nmed <- rbind(nc_1.5_250_AFT, nonrare_1.5_250_AFT, rare_1.5_250_AFT, nc_1_250_AFT, nonrare_1_250_AFT, rare_1_250_AFT, nc_23_250_AFT, nonrare_23_250_AFT, rare_23_250_AFT, nc_1.5_500_AFT, nonrare_1.5_500_AFT, rare_1.5_500_AFT, nc_1_500_AFT, nonrare_1_500_AFT, rare_1_500_AFT, nc_23_500_AFT, nonrare_23_500_AFT, rare_23_500_AFT, nc_1.5_1000_AFT, nonrare_1.5_1000_AFT, rare_1.5_1000_AFT, nc_1_1000_AFT, nonrare_1_1000_AFT, rare_1_1000_AFT, nc_23_1000_AFT, nonrare_23_1000_AFT, rare_23_1000_AFT)
+
+row.names(tab.aft.nexp.nmed)<- c("nc_1.5_250_AFT", "nonrare_1.5_250_AFT", "rare_1.5_250_AFT", "nc_1_250_AFT", "nonrare_1_250_AFT", "rare_1_250_AFT", "nc_23_250_AFT", "nonrare_23_250_AFT", "rare_23_250_AFT", "nc_1.5_500_AFT", "nonrare_1.5_500_AFT", "rare_1.5_500_AFT", "nc_1_500_AFT", "nonrare_1_500_AFT", "rare_1_500_AFT", "nc_23_500_AFT", "nonrare_23_500_AFT", "rare_23_500_AFT","nc_1.5_1000_AFT", "nonrare_1.5_1000_AFT", "rare_1.5_1000_AFT", "nc_1_1000_AFT", "nonrare_1_1000_AFT", "rare_1_1000_AFT", "nc_23_1000_AFT", "nonrare_23_1000_AFT", "rare_23_1000_AFT")
+
+tab.plot.aft <- as.data.frame(tab.aft.nexp.nmed[ , 4:ncol(tab.aft.nexp.nmed)])
+
+tab.plot.aft$hazard <- c("Increasing", "Increasing", "Increasing", "Constant", "Constant", "Constant", "Decreasing", "Decreasing", "Decreasing", "Increasing", "Increasing", "Increasing", "Constant", "Constant", "Constant", "Decreasing", "Decreasing", "Decreasing", "Increasing", "Increasing", "Increasing", "Constant", "Constant", "Constant", "Decreasing", "Decreasing", "Decreasing" )
+
+#Save full results table
+results.sim.cl.aft <- as.data.frame(tab.plot.aft)
+
+#Change to desired directory
+write.table(results.sim.cl.aft, "C:/Users/liz_c/Dropbox/Survival/R code/Classical mediation approach/Full results table/results.sim.cl.aft.BB.txt", sep="\t")
+
+```
+
+
+COX MODEL: Scenarios
+
+```{r}
+#250 SAMPLE SIZE
+#SHAPE 1.5
+
+nc_1.5_250_COX <- sim_rare_ev(0,1.5,"NC",250, "BIN", "BIN", "COX")
+nonrare_1.5_250_COX <- sim_rare_ev(280,1.5,"40",250, "BIN", "BIN", "COX")
+rare_1.5_250_COX <- sim_rare_ev(20,1.5,"90",250, "BIN", "BIN", "COX")
+
+#SHAPE 1
+nc_1_250_COX <- sim_rare_ev(0,1,"NC",250, "BIN", "BIN", "COX")
+nonrare_1_250_COX <- sim_rare_ev(360,1,"40",250, "BIN", "BIN", "COX")
+rare_1_250_COX <- sim_rare_ev(20,1,"90",250, "BIN", "BIN", "COX")
+
+#SHAPE 2/3
+nc_23_250_COX <- sim_rare_ev(0,2/3,"NC",250, "BIN", "BIN", "COX")
+nonrare_23_250_COX <- sim_rare_ev(540,2/3,"40",250, "BIN", "BIN", "COX")
+rare_23_250_COX <- sim_rare_ev(12,2/3,"90",250, "BIN", "BIN", "COX")
+
+
+#500 SAMPLE SIZE
+#SHAPE 1.5
+nc_1.5_500_COX <- sim_rare_ev(0,1.5,"NC",500, "BIN", "BIN", "COX")
+nonrare_1.5_500_COX <- sim_rare_ev(280,1.5,"40",500, "BIN", "BIN", "COX")
+rare_1.5_500_COX <- sim_rare_ev(20, 1.5,"90",500, "BIN", "BIN", "COX")
+
+#SHAPE 1
+nc_1_500_COX <- sim_rare_ev(0,1,"NC",500, "BIN", "BIN", "COX")
+nonrare_1_500_COX <- sim_rare_ev(360,1,"40",500, "BIN", "BIN", "COX")
+rare_1_500_COX <- sim_rare_ev(20,1,"90",500, "BIN", "BIN", "COX")
+
+#SHAPE 2/3
+nc_23_500_COX <- sim_rare_ev(0,2/3,"NC",500, "BIN", "BIN", "COX")
+nonrare_23_500_COX <- sim_rare_ev(540,2/3,"40",500, "BIN", "BIN", "COX")
+rare_23_500_COX <- sim_rare_ev(12,2/3,"90",500, "BIN", "BIN", "COX")
+
+#1000 SAMPLE SIZE
+#SHAPE 1.5
+nc_1.5_1000_COX <- sim_rare_ev(0,1.5,"NC",1000, "BIN", "BIN", "COX")
+nonrare_1.5_1000_COX <- sim_rare_ev(280,1.5,"40",1000, "BIN", "BIN", "COX")
+rare_1.5_1000_COX <- sim_rare_ev(20,1.5,"90",1000, "BIN", "BIN", "COX")
+
+#SHAPE 1
+nc_1_1000_COX <- sim_rare_ev(0,1,"NC",1000, "BIN", "BIN", "COX")
+nonrare_1_1000_COX <- sim_rare_ev(360,1,"40",1000, "BIN", "BIN", "COX")
+rare_1_1000_COX <- sim_rare_ev(15,1,"90",1000, "BIN", "BIN", "COX")
+
+#SHAPE 2/3
+nc_23_1000_COX <- sim_rare_ev(0,2/3,"NC",1000, "BIN", "BIN", "COX")
+nonrare_23_1000_COX <- sim_rare_ev(540,2/3,"40",1000, "BIN", "BIN", "COX")
+rare_23_1000_COX <- sim_rare_ev(15,2/3,"90",1000, "BIN", "BIN", "COX")
+
+```
+
+
+COX MODEL: Results tables
+
+```{r}
+#Full results 
+tab.COX.nexp.nmed <- rbind(nc_1.5_250_COX, nonrare_1.5_250_COX, rare_1.5_250_COX, nc_1_250_COX, nonrare_1_250_COX, rare_1_250_COX, nc_23_250_COX, nonrare_23_250_COX, rare_23_250_COX, nc_1.5_500_COX, nonrare_1.5_500_COX, rare_1.5_500_COX, nc_1_500_COX, nonrare_1_500_COX, rare_1_500_COX, nc_23_500_COX, nonrare_23_500_COX, rare_23_500_COX, nc_1.5_1000_COX, nonrare_1.5_1000_COX, rare_1.5_1000_COX, nc_1_1000_COX, nonrare_1_1000_COX, rare_1_1000_COX, nc_23_1000_COX, nonrare_23_1000_COX, rare_23_1000_COX)
+
+row.names(tab.COX.nexp.nmed)<- c("nc_1.5_250_COX", "nonrare_1.5_250_COX", "rare_1.5_250_COX", "nc_1_250_COX", "nonrare_1_250_COX", "rare_1_250_COX", "nc_23_250_COX", "nonrare_23_250_COX", "rare_23_250_COX", "nc_1.5_500_COX", "nonrare_1.5_500_COX", "rare_1.5_500_COX", "nc_1_500_COX", "nonrare_1_500_COX", "rare_1_500_COX", "nc_23_500_COX", "nonrare_23_500_COX", "rare_23_500_COX","nc_1.5_1000_COX", "nonrare_1.5_1000_COX", "rare_1.5_1000_COX", "nc_1_1000_COX", "nonrare_1_1000_COX", "rare_1_1000_COX", "nc_23_1000_COX", "nonrare_23_1000_COX", "rare_23_1000_COX")
+
+tab.plot.COX <- as.data.frame(tab.COX.nexp.nmed[ , 4:ncol(tab.COX.nexp.nmed)])
+
+tab.plot.COX$hazard <- c("Increasing", "Increasing", "Increasing", "Constant", "Constant", "Constant", "Decreasing", "Decreasing", "Decreasing", "Increasing", "Increasing", "Increasing", "Constant", "Constant", "Constant", "Decreasing", "Decreasing", "Decreasing", "Increasing", "Increasing", "Increasing", "Constant", "Constant", "Constant", "Decreasing", "Decreasing", "Decreasing" )
+
+#Save full results table
+results.sim.cl.Cox <- as.data.frame(tab.plot.COX)
+
+#Change to desired directory
+write.table(results.sim.cl.Cox, "C:/Users/liz_c/Dropbox/Survival/R code/Classical mediation approach/Full results table/results.sim.cl.Cox.BB.txt", sep="\t")
+
+```
+
+
+PART 2: PLOTS
+
+Note: These plots are not shown in the paper.  
+```{r}
+#PROPORTIONAL BIAS
+
+#AFT MODEL
+#ab
+prop.bias.AFT.ab.plot.Nexp.Nmed <- ggplot(tab.plot.aft, aes(x = factor(N), y = prop.bias.ab, linetype=factor(m_cens), shape = factor(hazard),colour=(hazard), group=interaction((hazard), m_cens))) +
+  ylim(-80, 80)+
+  geom_point(size = 4) +
+  #geom_point(colour = "white", size = 1)+
+  geom_line(colour = "black", size=0.8)+ 
+  scale_color_brewer(palette="Set1")+
+  scale_linetype_manual(values=c("solid", "4C88C488", "dotted"), labels=c("No censoring", "40%", "90%"))+
+  labs(title = "Proportional bias ab method (AFT model)", x="N", y="Proportional bias (%)", shape="Hazard", colour= "Hazard",linetype="Censoring")+
+  theme(plot.title = element_text(size = rel(1)), axis.title.y = element_text(size = rel(1.2)))+
+  panel_border(colour = "black", size = 0.5, linetype = 1,remove = FALSE)+
+  theme(legend.position="bottom", legend.direction="vertical", legend.justification="center", legend.key = element_rect(colour = 'black', fill = FALSE, size = 0.5, linetype='solid'))+
+geom_hline(yintercept=0, linetype="solid", color = "red", size=0.5)
+
+#c-c'
+prop.bias.AFT.ccp.plot.Nexp.Nmed<-ggplot(tab.plot.aft, aes(x = factor(N), y = prop.bias.ccp, linetype=factor(m_cens), shape = factor(hazard),colour=(hazard), group=interaction((hazard), m_cens))) +
+  ylim(-80, 80)+
+  geom_point(size = 4) +
+  geom_line(colour = "black", size=0.8)+ 
+  scale_color_brewer(palette="Set1")+
+  scale_linetype_manual(values=c("solid", "4C88C488", "dotted"), labels=c("No censoring", "40%", "90%"))+
+  labs(title = "Proportional bias c-c' method (AFT model)", x="N", y="Proportional bias (%)", shape="Hazard", colour= "Hazard",linetype="Censoring")+
+  theme(plot.title = element_text(size = rel(1)), axis.title.y = element_text(size = rel(1.2)))+
+  panel_border(colour = "black", size = 0.5, linetype = 1,remove = FALSE)+
+  theme(legend.position="bottom", legend.direction="vertical", legend.justification="center", legend.key = element_rect(colour = 'black', fill = FALSE, size = 0.5, linetype='solid'))+
+geom_hline(yintercept=0, linetype="solid", color = "red", size=0.5)
+
+#COX MODEL
+
+#ab
+prop.bias.COX.ab.plot.Nexp.Nmed <- ggplot(tab.plot.COX, aes(x = factor(N), y = prop.bias.ab, linetype=factor(m_cens), shape = factor(hazard),colour=(hazard), group=interaction((hazard), m_cens))) +
+  ylim(-80, 80)+
+  geom_point(size = 4) +
+  #geom_point(colour = "white", size = 1)+
+  geom_line(colour = "black", size=0.8)+ 
+  scale_color_brewer(palette="Set1")+
+  scale_linetype_manual(values=c("solid", "4C88C488", "dotted"), labels=c("No censoring", "40%", "90%"))+
+  labs(title = "Proportional bias ab method (Cox model)", x="N", y="Proportional bias (%)", shape="Hazard", colour= "Hazard",linetype="Censoring")+
+ # scale_shape_discrete(labels=c("Constant", "Increasing", "Decreasing"))+
+  theme(plot.title = element_text(size = rel(1)), axis.title.y = element_text(size = rel(1.2)))+
+  panel_border(colour = "black", size = 0.5, linetype = 1,remove = FALSE)+
+  theme(legend.position="bottom", legend.direction="vertical", legend.justification="center", legend.key = element_rect(colour = 'black', fill = FALSE, size = 0.5, linetype='solid'))+
+geom_hline(yintercept=0, linetype="solid", color = "red", size=0.5)
+
+
+
+#c-c'
+prop.bias.COX.ccp.plot.Nexp.Nmed <- ggplot(tab.plot.COX, aes(x = factor(N), y = prop.bias.ccp, linetype=factor(m_cens), shape = factor(hazard),colour=(hazard), group=interaction((hazard), m_cens))) +
+  ylim(-80, 80)+
+   geom_point(size = 4) +
+  geom_line(colour = "black", size=0.8)+ 
+  scale_color_brewer(palette="Set1")+
+  scale_linetype_manual(values=c("solid", "4C88C488", "dotted"), labels=c("No censoring", "40%", "90%"))+
+  labs(title = "Proportional bias c-c' method (Cox model)", x="N", y="Proportional bias (%)", shape="Hazard", colour= "Hazard",linetype="Censoring")+
+  theme(plot.title = element_text(size = rel(1)), axis.title.y = element_text(size = rel(1.2)))+
+  panel_border(colour = "black", size = 0.5, linetype = 1,remove = FALSE)+
+  theme(legend.position="bottom", legend.direction="vertical", legend.justification="center", legend.key = element_rect(colour = 'black', fill = FALSE, size = 0.5, linetype='solid'))+
+geom_hline(yintercept=0, linetype="solid", color = "red", size=0.5)
+
+#Save panel plot ab and c-c'
+pdf("prop.bias.Nexp.Nmed3.pdf",width=10, height=10, onefile=FALSE)
+ggarrange(prop.bias.AFT.ab.plot.Nexp.Nmed, prop.bias.COX.ab.plot.Nexp.Nmed, prop.bias.AFT.ccp.plot.Nexp.Nmed, prop.bias.COX.ccp.plot.Nexp.Nmed, labels = c("A", "B", "C", "D"),common.legend = TRUE, legend = "bottom")
+dev.off()
+
+```
+
+

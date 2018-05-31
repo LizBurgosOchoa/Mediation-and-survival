@@ -1,0 +1,516 @@
+---
+title: "NESDA DATA:ILLUSTRATION OF METHODS"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+chunk_output_type: inline
+---
+
+This R Notebook contains the necessary code to analyse the NESDA data with the four methods for performing mediation analysis with time-to-event outcomes.I) the classical mediation approach with Cox PH model (ab and c-c' methods); II) the classical mediation approach with the AFT model (ab and c-c' methods); III-IV) Lange et al. potential outcomes approach for both, Cox and AFT models, respectively. 
+
+When you execute code within the notebook, the results appear beneath the code. Try executing the chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+PART 1: LOAD DATA, DESCRIPTIVES, ASSUMPTION CHECK
+
+First, load data and packages. Please install the following packages before running the code.
+```{r}
+#To instal packages write, for example (without the #): 
+#install.packages("survival")
+
+library(foreign)
+library(plyr)
+library(survival)
+
+#Load data
+data = read.spss("C:/Users/liz_c/Downloads/NESDA DATA/NESDA BACKUP/Data files/auto2.sav", to.data.frame=TRUE) # change to relevant working directory
+dat <-rename(data, c("EVENT"="event")) #rename event variable
+
+
+#DESCRIPTVIVE STATISTICS. 
+
+#Number of events 
+events <- table(dat$event)
+#Frequencies CPG
+cpg.fr <- table(dat$CPG)
+#Frequencies sex
+sex.fr <- table(dat$Sexe)
+#Mean and SD of age
+m.age <- mean(dat$Age)
+sd.age <- sd(dat$Age)
+#Mean and SD of education (years)
+m.age <- mean(dat$aedu)
+sd.age <- sd(dat$aedu)
+#Mean and SD of QIDS
+m.age <- mean(dat$QUIDS)
+sd.age <- sd(dat$QUIDS)
+
+#ASSUMPTION CHECK
+
+# Weibull assumption
+
+#AIC 
+#Fit model with different distributions
+weibull_dir_cpg <-survreg(formula = Surv(time, event) ~ aedu+ rec_epi+ Age+ Sexe + CPG + QUIDS , dat,dist = "weibull") #weibull model
+
+exp_dir_cpg <-survreg(formula = Surv(time, event) ~ aedu+ factor(rec_epi)+ Age+ factor(Sexe) + (CPG) , dat,dist = "exponential") #exponential
+
+logn_dir_cpg <-survreg(formula = Surv(time, event) ~ aedu+ factor(rec_epi)+ Age+ factor(Sexe) + (CPG) , dat,dist = "lognormal") #log normal
+
+loglog_dir_cpg <-survreg(formula = Surv(time, event) ~ aedu+ factor(rec_epi)+ Age+ factor(Sexe) + (CPG) , dat,dist = "logistic") #log logistic
+
+#Obtain AIC. Weibull model has lowest AIC, thus it offers the best model fit 
+AIC(weibull_dir_cpg)
+AIC(exp_dir_cpg)
+AIC(logn_dir_cpg)
+AIC(loglog_dir_cpg)
+
+#Cox-snell residuals 
+
+#Cox-Snell residuals to assess the fit of the Weibull model for time to depression recurrence.
+#Fit full model with weibull distribution
+nesda.weibull <- survreg(formula = Surv(time, event) ~ aedu+ rec_epi+ Age+ Sexe + CPG + QUIDS , dataset2,dist = "weibull")
+
+#Compute residuals
+hat.sig = nesda.weibull$scale #scale
+hat.alpha = 1/hat.sig #shape
+reg.linear = nesda.weibull$linear.predictor #linear predictor
+reg.linear.mdf = -reg.linear/hat.sig
+tt=cbind(Surv(dataset2$time,dataset2$event))[,1]
+cs.resid = exp(reg.linear.mdf)*tt^(hat.alpha)
+cs.fit = survfit(Surv(cs.resid,dataset2$event)~1,
+                 type="fleming-harrington")
+minuslog_cs.fit_surv<- -log(cs.fit$surv)
+
+#Generate plot
+cs.resid.plot <- plot(cs.fit$time, -log(cs.fit$surv),  xlab = "Cox-Snell residuals", ylab = " Estimated Cumulative Hazard Rates", ylim=c(0,2), xlim=c(0,2), title(main="Cox-Snell residuals"))
+abline(0,1, col="red")
+
+#There is linearity on the line with slope 1 through the origin, thus, there is no evidence of violation of the Weibull assumption.
+
+
+#Proportional Hazards assumtpion
+
+library(survminer)
+
+#Test full model
+test.model.cp<-coxph(formula = Surv(time, event) ~ EXPOSURE +M + cov1+ cov2+ cov3+ cov4,dat, method = "breslow")
+
+#No significant results, no violation of PH assumption
+test.ph.cp <- cox.zph(test.model.cp)
+  
+#Graphical inspection
+ggcoxzph(test.ph.cp) #random pattern, no violation of PH assumption
+
+
+#No evidence of violation of any of the model assumptions. 
+
+
+#PLOT HAZARD FUNCTION TO SEARCH FOR INCREASING, DECREASING OR CONSTANT HAZARDS. Figure 4 in paper. 
+#Fit a survreg model (AFT)
+test.model.c <- survreg(formula = Surv(time, EVENT) ~ EXPOSURE  + cov1+ cov2+ cov3+ cov4,dat2, dist = "weibull")
+summary(test.model.c)
+  
+scale <- test.model.c$scale #scale from survreg model
+intercept <- test.model.c$coeff[1,1] #intercept of survreg model
+x<- dat2$CPG # exposure 
+
+#Plot hazard  
+curve(dweibull(x, scale=exp(intercept), shape=1/scale)
+      /pweibull(x, scale=exp(intercept), shape=1/scale, lower.tail=FALSE), 
+      from=0, to=100, col='blue', lwd=2, ylab=expression(hat(h)(t)), xlab='t',bty='n')
+
+#The obtained plot corresponds to increasing hazards.
+
+```
+
+
+PART 2: CLASSICAL MEDIATION APPROACH
+
+Function to estimate the mediation effects (using ab and c-c') and bootstrap 95% CI's. AFT and Cox models
+
+Arguments
+dat=dataset
+model= AFT or Cox 
+
+```{r}
+data$event=data$EVENT
+boot.med <- function(dat, model){ 
+    
+    tempData <- dat[sample(1:nrow(dat), replace = T), ]
+    
+    if (model=="AFT"){
+    
+    alpha.temp <- coefficients(lm(QUIDS ~ CPG + aedu+ rec_epi+ Age+ Sexe,tempData))[2] # X coefficient
+    
+    beta.temp <- ( coefficients(survreg(formula = Surv(time, event) ~ QUIDS+aedu+ rec_epi+ Age+ Sexe, tempData,dist = "weibull"))[2])
+    
+    c_prime.temp <- (coefficients(survreg(formula = Surv(time, event) ~ CPG + QUIDS + aedu + rec_epi+ Age + Sexe, tempData,dist = "weibull"))[2])
+    
+     c.temp <- (coefficients(survreg(formula = Surv(time, event) ~  CPG + aedu + rec_epi+ Age + Sexe, tempData,dist = "weibull"))[2])
+    }
+    
+else if (model=="COX"){
+    
+     alpha.temp <- coefficients(lm(lm(QUIDS ~ CPG + aedu+ rec_epi+ Age+ Sexe,tempData)))[2] # X coefficient 
+    
+     beta.temp <- (coefficients(coxph(formula = Surv(time, event) ~ QUIDS+aedu+ rec_epi+ Age+ Sexe, tempData, method = "breslow"))[1])
+    
+     c_prime.temp <- (coefficients(coxph(formula = Surv(time, event) ~ CPG + QUIDS + aedu + rec_epi+ Age + Sexe, tempData,method = "breslow")))[1]
+    
+     c.temp <- (coefficients(coxph(formula = Surv(time, event) ~  CPG + aedu + rec_epi+ Age + Sexe, tempData, method = "breslow"))[1])
+      
+    }
+      
+    # Indirect effects IE1= a*b, IE2= c-c'
+    IE1.l <- alpha.temp*beta.temp
+    IE2.l <- c.temp-c_prime.temp
+    
+    results <- c(IE1.l, IE2.l)
+    return(results)
+    } #end function
+```
+
+Estimating mediation effects and bootrsapping CI's from NESDA dataset
+Classical mediation approach 
+AFT and Cox
+
+```{r}
+
+# AFT MODEL
+
+    G <- 10^3 #number of repetitions for boostrapping
+
+    #Matrices to store the Indirect effect (IE)
+    IE1.aft <- matrix(rep(0,G),G,1)
+    IE2.aft <- matrix(rep(0,G),G,1)  
+    
+    #Repeat boot.med function using lapply 
+    med.boot.aft <- lapply(1:G, FUN = function(i) boot.med(dat, "AFT"))
+    
+    #Store IE1 and IE2 in vectors
+    IE1.aft <- unlist(lapply(med.boot.aft, '[[', 1)) # This returns a vector with the 1st number of each element of the list, a.k.a the IE1.l
+    
+    IE2.aft <- unlist(lapply(med.boot.aft, '[[', 2)) # This returns a vector with the 1st number of each element of the list, a.k.a the IE2.l
+    
+    
+    ci.ab.aft <- as.table(quantile (IE1.aft, c(0.025, 0.975))) #95% CI's ab
+    ci.ccp.aft <- as.table(quantile (IE2.aft, c(0.025, 0.975))) #95% CI's c-c'
+    
+    
+# COX MODEL 
+    
+    G <- 10^3
+    IE1.cox <- matrix(rep(0,G),G,1)
+    IE2.cox <- matrix(rep(0,G),G,1)  
+    
+    #Repeat boot.med function using lapply 
+    med.boot.cox <- lapply(1:G, FUN = function(i) boot.med(dat, "COX"))
+    
+    #Store IE1= ab estimate and IE2= c-c' estimate in vectors
+    IE1.cox <- unlist(lapply(med.boot.cox, '[[', 1)) # This returns a vector with the 1st number of each element of the list, a.k.a the IE1.l
+    
+    IE2.cox <- unlist(lapply(med.boot.cox, '[[', 2)) # This returns a vector with the 1st number of each element of the list, a.k.a the IE2.l
+    
+    # IE estimates and 95% CI for AFT model (ab and c-c' methods)
+    ind.ab.aft <- mean(IE1.aft) # IE ab method
+    ind.ccp.aft <-mean(IE2.aft) # IE c-c' method
+    ci.ab.aft <- as.table(quantile (IE1.aft, c(0.025, 0.975))) #95% CI's ab
+    ci.ccp.aft <- as.table(quantile (IE2.aft, c(0.025, 0.975))) #95% CI's c-c'
+    
+    # IE estimates and 95% CI for Cox model (ab and c-c' methods)
+    
+    ind.ab.cox <- mean(IE1.cox) # IE ab method
+    ind.ccp.cox <-mean(IE2.cox) # IE c-c' method
+    ci.ab.cox <- as.table(quantile (IE1.cox, c(0.025, 0.975))) #95% CI's ab
+    ci.ccp.cox <- as.table(quantile (IE2.cox, c(0.025, 0.975))) #95% CI's c-c'
+
+    ci.results <- rbind(ci.ab.aft, ci.ccp.aft, ci.ab.cox, ci.ccp.cox)
+    ie.est<- rbind(ind.ab.aft, ind.ccp.aft,ind.ab.cox,ind.ccp.cox)
+    results.classical <- cbind(ie.est, ci.results)
+    
+    row.names(results.classical) <- c("AFT ab", "AFT c-c'", "Cox ab", "Cox c-c'")
+    colnames(results.classical) <- c("IE", "CI lower", "CI upper")
+    
+
+#See results from classical mediation approach. Top part of Table 4 in paper.
+    results.classical
+
+``` 
+
+
+
+PART 3. POTENTIAL OUTCOMES MEDIATION APPROACH 
+
+First, make a copy of data (good idea since we are working with imputation) and rename the variables to make it easier.
+
+```{r}
+
+#Copy of dataset
+dat2 <- dat
+
+#Rename variables for simplicity
+dat2$event <- dat2$EVENT
+dat2$EXPOSURE <- dat2$CPG
+dat2$M <- dat2$QUIDS
+dat2$cov1 <- dat2$rec_epi
+dat2$cov2 <- dat2$aedu
+dat2$cov3 <- dat2$Age
+dat2$cov4 <- dat2$Sexe
+dat2$id <- seq.int(nrow(dat2))
+maxFollowUpTimeTemp<- max(dat2$time)
+levelsofExp<- unique(dat2$EXPOSURE)
+
+```
+
+
+FitNEM function
+
+Function to fit the Natural Effect Model (NEMs) 
+
+Arguments
+dat: dataset
+maxFollowUpTimeTemp: maximum time of follow up (study duration).
+```{r}
+
+fitNEM.COX <- function(dat, maxFollowUpTimeTemp) {  
+
+#STEP 1. fit a mediation model: fit a parametric survival model with a Weibull error distribution to the survival times using the treatment group*, mediators and confounders (age).
+
+dat$EXPOSURETEMP <- dat$EXPOSURE #copy exposure variable
+
+
+#fit model 
+fitImp <- survreg(Surv(time,event) ~ (EXPOSURETEMP) + M + cov1 + cov2 + cov3 + cov4 , data=dat)
+coefficients(fitImp)
+
+# STEP 2. Do dataset expansion and imputation
+
+#Multicategorical exposure: replicate the dataset as many times as there are exposure categories
+
+levelsofExp<- unique(dat$EXPOSURE) #levels of exposure
+
+#tempData1
+tempData1 <- dat
+tempData1$EXPOSURETEMP <- 0 #LEVEL 0 OF EXPOSURE
+tempData1$EXPOSURESTAR <- tempData1$EXPOSURE #OBSERVED EXPOSURE
+
+#tempData2
+tempData2 <- dat
+tempData2$EXPOSURESTAR <- tempData2$EXPOSURE
+tempData2$EXPOSURETEMP <- 1 #Level 1 of exposure
+
+linPredTemp <- predict(fitImp,newdata=tempData2,type="linear")
+
+simeventTimesTemp <- rweibull(nrow(tempData2), shape=1/fitImp$scale, exp(linPredTemp))
+
+tempData2$event <- 1*(simeventTimesTemp < maxFollowUpTimeTemp)
+
+tempData2$time <- simeventTimesTemp*(simeventTimesTemp<maxFollowUpTimeTemp) + maxFollowUpTimeTemp*(simeventTimesTemp >= maxFollowUpTimeTemp)
+
+#tempData3 
+tempData3 <- dat
+tempData3$EXPOSURESTAR <- tempData3$EXPOSURE
+tempData3$EXPOSURETEMP <- 2 #LEVEL 2 OF EXPOSURE
+
+linPredTemp <- predict(fitImp,newdata=tempData3,type="linear")
+
+simeventTimesTemp<- rweibull(nrow(tempData3), shape=1/fitImp$scale, exp(linPredTemp))
+
+tempData3$event <- 1*(simeventTimesTemp < maxFollowUpTimeTemp)
+
+tempData3$time <- simeventTimesTemp*(simeventTimesTemp<maxFollowUpTimeTemp) + maxFollowUpTimeTemp*(simeventTimesTemp >= maxFollowUpTimeTemp)
+
+#tempData4
+tempData4 <- dat
+tempData4$EXPOSURESTAR <- tempData4$EXPOSURE
+tempData4$EXPOSURETEMP <- 3 #EXPOSURE LEVEL 3
+
+linPredTemp <- predict(fitImp,newdata=tempData4,type="linear")
+
+simeventTimesTemp<- rweibull(nrow(tempData4), shape=1/fitImp$scale, exp(linPredTemp))
+
+tempData4$event <- 1*(simeventTimesTemp < maxFollowUpTimeTemp)
+
+tempData4$time <- simeventTimesTemp*(simeventTimesTemp<maxFollowUpTimeTemp) + maxFollowUpTimeTemp*(simeventTimesTemp >= maxFollowUpTimeTemp)
+
+#tempData5
+tempData5 <- dat
+tempData5$EXPOSURESTAR <- tempData5$EXPOSURE
+tempData5$EXPOSURETEMP <- 4 #EXPOSURE LEVEL 4
+
+linPredTemp <- predict(fitImp,newdata=tempData5,type="linear")
+
+simeventTimesTemp<- rweibull(nrow(tempData5), shape=1/fitImp$scale, exp(linPredTemp))
+
+tempData5$event <- 1*(simeventTimesTemp < maxFollowUpTimeTemp)
+
+tempData5$time <- simeventTimesTemp*(simeventTimesTemp<maxFollowUpTimeTemp) + maxFollowUpTimeTemp*(simeventTimesTemp >= maxFollowUpTimeTemp)
+
+
+#Bind datasets 
+expData <- rbind(tempData1,tempData2, tempData3, tempData4, tempData5)
+
+
+#fit natural effects model
+fitNEM <- coxph(Surv(time,event) ~ (EXPOSURETEMP) + (EXPOSURESTAR) + cov1 + cov2 + cov3 + cov4 , data= expData)
+coeff1<- as.vector(summary(fitNEM)$coefficients) [1:2]
+se <- (summary(fitNEM)$coefficients) 
+se<- se[,3] 
+results <- as.table (rbind(coeff1, se))
+results <- results[,1:2]
+return(results)
+} #END FUNCTION fitNem
+```
+
+
+Estimating mediation effects and bootrsapping CI's from NESDA dataset
+Potential outcomes mediation approach 
+
+AFT MODEL
+
+```{r}
+
+#Preliminary step: fit the NEM using the AFT model
+tempFitNem <- fitNEM (dat, maxFollowUpTimeTemp = maxFollowUpTimeTemp)
+
+z<- as.matrix(tempFitNem)
+
+Nimp<- 20 #number of imputations
+
+outTable<- array(NA, dim=c(dim(z), Nimp)) #storing table
+
+#Imputation of datasets
+for (j in 1:Nimp)
+{
+  outTable[,,j] <- fitNEM(dat, maxFollowUpTimeTemp = maxFollowUpTimeTemp)
+  
+}
+
+#Combine results from previous step with Amelia package for multiple imputation
+
+library(Amelia)
+temp <- mi.meld(q=outTable[1,,], se=outTable[2,,], byrow = F)
+tempOut <- tempFitNem [,1:3]
+tempOut[1,] <- temp$q.mi
+tempOut[2,]<- temp$se.mi
+
+# Obtain final mediation effects estimates and 95% CI's
+
+G <- 10^3 #number of repetitions for bootrsapping
+outputObj <- array(NA,dim=c(dim(tempFitNem),G)) #preliminar output array
+
+#Imputation and bootstrapping
+for(j in 1:G)
+{
+  tempData <- dat[sample(1:nrow(dat)),] #boostrapping
+  temp <- try(fitNEM(tempData,maxFollowUpTimeTemp),silent=TRUE)
+  if(class(temp)!="try−error")outputObj[,,j] <- temp
+  rm(tempData,temp)
+  save(outputObj,file="outputObj.Rdata")
+}
+
+#Store results
+outTable <- tempFitNem[,1:3]
+outTable[,1] <- apply(outputObj[,1,],1,mean,na.rm=T)
+outTable[,2] <- apply(outputObj[,1,],1,sd,na.rm=T)
+
+
+INT <- outputObj[1,1,]
+IE <- outputObj[1,2,]
+DE <- outputObj[1,3,]
+TE <- IE+DE
+
+outTable  <- matrix(NA,nrow=3,ncol=3)
+outTable[1,] <- c(mean(INT),quantile(IE,c(.025,.975)))
+outTable[2,] <- c(mean(IE),quantile(DE,c(.025,.975)))
+outTable[3,] <- c(mean(DE),quantile(TE,c(.025,.975)))
+
+rownames(outTable) <- c("INT","DE","IE") #INT= intercept for AFT; DE= Natural Direct Effect; IE=Natural Indirect Effect
+colnames(outTable) <- c("Estimate", "CI low-bound", "CI up-bound" )
+
+#Final results table
+AFT.outTable <- outTable
+```
+
+
+COX MODEL 
+
+```{r}
+
+#Preliminary step: fit the NEM using the Cox model
+tempFitNem <- fitNEM.COX (dat, maxFollowUpTimeTemp = maxFollowUpTimeTemp)
+z<- as.matrix(tempFitNem)
+
+Nimp<- 20 #number of imputations
+
+outTable<- array(NA, dim=c(dim(z), Nimp)) #storing table
+
+#Imputation of datasets
+for (j in 1:Nimp)
+{
+  outTable[,,j] <- fitNEM.COX(dat, maxFollowUpTimeTemp = maxFollowUpTimeTemp)
+  
+}
+
+#Combine results from previous step with Amelia package for multiple imputation
+library(Amelia)
+
+temp <- mi.meld(q=outTable[1,,], se=outTable[2,,], byrow = F)
+tempOut <- tempFitNem [,1:2]
+tempOut[1,] <- temp$q.mi
+tempOut[2,]<- temp$se.mi
+
+
+# Obtain final mediation effects estimates and 95% CI's
+G <- 10^3 #number of repetitions for bootrsapping
+outputObj <- array(NA,dim=c(dim(tempFitNem),G)) #preliminar output array
+
+#Imputation and bootstrapping
+
+for(j in 1:G)
+{
+  tempData <- dat[sample(1:nrow(dat)),]
+  temp <- try(fitNEM.COX(tempData,maxFollowUpTimeTemp),silent=TRUE)
+  if(class(temp)!="try−error")outputObj[,,j] <- temp
+  rm(tempData,temp)
+  save(outputObj,file="outputObj.Rdata")
+}
+outTable <- tempFitNem[,1:2]
+outTable[,1] <- apply(outputObj[,1,],1,mean,na.rm=T)
+outTable[,2] <- apply(outputObj[,1,],1,sd,na.rm=T)
+
+#Store results
+DE <- outputObj[1,1,]
+IE <- outputObj[1,2,]
+
+outTable  <- matrix(NA,nrow=2,ncol=3)
+outTable[1,] <- c(mean(DE),quantile(IE,c(.025,.975)))
+outTable[2,] <- c(mean(IE),quantile(DE,c(.025,.975)))
+
+rownames(outTable) <- c("DE","IE") #DE= Natural Direct Effect; IE=Natural Indirect Effect
+colnames(outTable) <- c("Estimate", "CI low-bound", "CI up-bound" )
+
+#Final results table
+COX.outTable <- outTable
+
+```
+
+
+PART 4
+
+FINAL RESULTS
+
+To see the results that can be foud in Table 3 from the paper run the following lines separately. 
+
+```{r}
+#Results from classical approach (top part of table 4)
+results.classical
+
+#Results from potential outcomes approach (botto of table 4)
+AFT.outTable
+COX.outTable
+
+```
+
+
+
