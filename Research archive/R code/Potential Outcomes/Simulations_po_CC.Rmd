@@ -64,7 +64,6 @@ expData <- rbind(tempData1,tempData2)
 
 #Fit natural effects model
 
-#fitNEM <- coxph(Surv(time,event) ~ X + XSTAR + age, data= expData)
 fitNEM <- survreg(Surv(time,event) ~ X + XSTAR, data= expData, dist = "weibull")
 coeff1<- as.vector(summary(fitNEM)$coefficients) 
 se <- as.matrix(sqrt(diag(vcov(fitNEM))))
