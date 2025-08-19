@@ -7,6 +7,7 @@ CONTENTS OF THIS FILE
  *SPECIAL REQUIREMENTS 
  *FOLDERS
  --------------------- 
+<a href="https://handle.stage.datacite.org/10.5072/zenodo.315060"><img src="https://sandbox.zenodo.org/badge/128733897.svg" alt="DOI"></a>
 
 GENERAL INFORMATION
 *Project
